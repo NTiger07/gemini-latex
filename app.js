@@ -1,50 +1,42 @@
 const express = require("express");
 const multer = require("multer");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const pdfParse = require("pdf-parse");
 const mammoth = require("mammoth");
 const Tesseract = require("tesseract.js");
-const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 
-// Configure Multer for file uploads
 const upload = multer({ dest: "uploads/" });
+const outputDir = path.join(__dirname, "output");
+if (!fs.existsSync(outputDir)) {
+  fs.mkdirSync(outputDir);
+}
 
-// Function to convert text to LaTeX using OpenAI
-async function convertToLatex(text) {
+// Initialize Google Gemini
+const genAI = new GoogleGenerativeAI(GOOGLE_GEMINI_API_KEY);
+
+async function convertImageToLatexGemini(path) {
   try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: "Convert the following text to LaTeX format.",
-          },
-          { role: "user", content: text },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    return response.data.choices[0].message.content;
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const temperature = 0.9
+    const prompt =
+      "Convert the given mathematical expression into a well-structured LaTeX document that is fully compatible with Overleaf. Ensure proper formatting, include necessary packages, and wrap the equation inside a document structure. The output should be a minimal but complete LaTeX document. The beginning should not include ```latex";
+    const result = await model.generateContent([prompt, path], temperature);
+    const response = await result.response;
+    let latex = response.text();
+    latex = latex.replace("```latex\n", '');
+    return latex;
   } catch (error) {
-    console.error("OpenAI API Error:", error);
+    console.error("Gemini API Error:", error);
     return null;
   }
 }
 
-// File processing route
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
@@ -53,36 +45,25 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     const filePath = req.file.path;
     const fileExt = path.extname(req.file.originalname).toLowerCase();
-    let extractedText = "";
+    let latexCode = ""
 
-    if (fileExt === ".pdf") {
-      const data = await pdfParse(fs.readFileSync(filePath));
-      extractedText = data.text;
-    } else if (fileExt === ".docx") {
-      const data = await mammoth.extractRawText({ path: filePath });
-      extractedText = data.value;
-    } else if ([".png", ".jpg", ".jpeg"].includes(fileExt)) {
-      const {
-        data: { text },
-      } = await Tesseract.recognize(filePath, "eng");
-      extractedText = text;
+    if ([".png", ".jpg", ".jpeg"].includes(fileExt)) {
+      latexCode = await convertImageToLatexGemini(filePath);
+      const texFilePath = path.join(
+        outputDir,
+        `${path.basename(filePath, fileExt)}.tex`
+      );
+      fs.writeFileSync(texFilePath, latexCode);
     } else {
       return res.status(400).json({ error: "Unsupported file type" });
     }
 
-    fs.unlinkSync(filePath); // Delete uploaded file after processing
+    fs.unlinkSync(filePath);
 
-    // Convert extracted text to LaTeX
-    const latexCode = await convertToLatex(extractedText);
-
-    console.log("MY CONSOLE: ", latexCode)
-
-    if (latexCode == null) {
+    if (!latexCode) {
       return res.status(500).json({ error: "Failed to convert to LaTeX" });
     }
-
-    res.json({ extractedText, latexCode });
-
+    res.json({ latexCode });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "File processing failed" });
