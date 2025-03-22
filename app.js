@@ -1,9 +1,6 @@
 const express = require("express");
 const multer = require("multer");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const pdfParse = require("pdf-parse");
-const mammoth = require("mammoth");
-const Tesseract = require("tesseract.js");
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
@@ -20,16 +17,29 @@ if (!fs.existsSync(outputDir)) {
 // Initialize Google Gemini
 const genAI = new GoogleGenerativeAI(GOOGLE_GEMINI_API_KEY);
 
-async function convertImageToLatexGemini(path) {
+function fileToGenerativePart(path, mimeType) {
+  return {
+    inlineData: {
+      data: Buffer.from(fs.readFileSync(path)).toString("base64"),
+      mimeType,
+    },
+  };
+}
+
+async function convertImageToLatexGemini(path, ext) {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const temperature = 0.9
+    const temperature = 0.9;
     const prompt =
-      "Convert the given mathematical expression into a well-structured LaTeX document that is fully compatible with Overleaf. Ensure proper formatting, include necessary packages, and wrap the equation inside a document structure. The output should be a minimal but complete LaTeX document. The beginning should not include ```latex";
-    const result = await model.generateContent([prompt, path], temperature);
-    const response = await result.response;
+      "Convert the given mathematical expression in the image into a well-structured LaTeX document that is fully compatible with Overleaf. Ensure proper formatting, include necessary packages, and wrap the equation inside a document structure. The output should be a minimal but complete LaTeX document. The beginning should not include ```latex";
+    const imageParts = [fileToGenerativePart(path, `image/${ext}`)];
+    const result = await model.generateContent(
+      [prompt, ...imageParts],
+      temperature
+    );
+    const response = result.response;
     let latex = response.text();
-    latex = latex.replace("```latex\n", '');
+    latex = latex.replace("```latex\n", "");
     return latex;
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -45,10 +55,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     const filePath = req.file.path;
     const fileExt = path.extname(req.file.originalname).toLowerCase();
-    let latexCode = ""
+    let latexCode = "";
 
     if ([".png", ".jpg", ".jpeg"].includes(fileExt)) {
-      latexCode = await convertImageToLatexGemini(filePath);
+      latexCode = await convertImageToLatexGemini(filePath, fileExt);
       const texFilePath = path.join(
         outputDir,
         `${path.basename(filePath, fileExt)}.tex`
