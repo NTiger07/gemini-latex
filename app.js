@@ -26,13 +26,13 @@ function fileToGenerativePart(path, mimeType) {
   };
 }
 
-async function convertImageToLatexGemini(path, ext) {
+async function convertImageToLatex(filesArray) {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const temperature = 0.9;
     const prompt =
-      "Convert the given mathematical expression in the image into a well-structured LaTeX document that is fully compatible with Overleaf. Ensure proper formatting, include necessary packages, and wrap the equation inside a document structure. The output should be a minimal but complete LaTeX document. The beginning should not include ```latex";
-    const imageParts = [fileToGenerativePart(path, `image/${ext}`)];
+      "Combine the given mathematical expressions in the images into a well-structured LaTeX document that is fully compatible with Overleaf. Ensure proper formatting, include necessary packages, and wrap the equations inside a document structure. The output should be a minimal but complete LaTeX document.";
+    const imageParts = [filesArray.map((file) => (fileToGenerativePart(file.path, file.mimetype)))];
     const result = await model.generateContent(
       [prompt, ...imageParts],
       temperature
@@ -47,31 +47,24 @@ async function convertImageToLatexGemini(path, ext) {
   }
 }
 
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/upload", upload.array("file", 5), async (req, res) => {
   try {
-    if (!req.file) {
+    if (!req.files) {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const filePath = req.file.path;
-    const fileExt = path.extname(req.file.originalname).toLowerCase();
-    let latexCode = "";
+    const files = req.files;
 
-    if ([".png", ".jpg", ".jpeg"].includes(fileExt)) {
-      latexCode = await convertImageToLatexGemini(filePath, fileExt);
-      const texFilePath = path.join(
-        outputDir,
-        `${path.basename(filePath, fileExt)}.tex`
-      );
-      fs.writeFileSync(texFilePath, latexCode);
-    } else {
-      return res.status(400).json({ error: "Unsupported file type" });
-    }
-
-    fs.unlinkSync(filePath);
-
+    const latexCode = await convertImageToLatex(files);
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
+    const texFilePath = path.join(
+      outputDir,
+      `${timestamp}.tex`
+    );
+    fs.writeFileSync(texFilePath, latexCode);
+    files.map((file) => (fs.unlinkSync(file.path)));
     if (!latexCode) {
-      return res.status(500).json({ error: "Failed to convert to LaTeX" });
+      return res.status(500).json({ error: "Failed to convert to Latex" });
     }
     res.json({ latexCode });
   } catch (error) {
