@@ -1,4 +1,5 @@
 /node_modules
 /output
 /test_files
+/uploads
 .env
