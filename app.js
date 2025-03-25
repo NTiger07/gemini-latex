@@ -14,7 +14,6 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
-// Initialize Google Gemini
 const genAI = new GoogleGenerativeAI(GOOGLE_GEMINI_API_KEY);
 
 function fileToGenerativePart(path, mimeType) {
